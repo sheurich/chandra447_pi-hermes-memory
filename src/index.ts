@@ -232,25 +232,27 @@ export default function (pi: ExtensionAPI) {
     });
 
     if (persistenceInitialized) {
-      try {
-        pruneEphemeralReviewSessions(dbManager);
-      } catch (err) {
-        console.warn(`⚠️ Ephemeral session cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      // Prune sessions older than the configured retention window to bound the
-      // size of the session index database (see #183). Runs before
-      // scheduleSessionBackfill so pruned sessions are never re-indexed by a
-      // backfill started in the same startup.
-      if (config.sessionRetentionDays && config.sessionRetentionDays > 0) {
+      if (config.sessionSearch?.enabled !== false) {
         try {
-          const pruneResult = pruneOldSessions(dbManager, config.sessionRetentionDays);
-          if (pruneResult.sessionsRemoved > 0) {
-            console.info(
-              `🧠 Pruned ${pruneResult.sessionsRemoved} old session(s) (> ${config.sessionRetentionDays} days old)`,
-            );
-          }
+          pruneEphemeralReviewSessions(dbManager);
         } catch (err) {
-          console.warn(`⚠️ Session pruning failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(`⚠️ Ephemeral session cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        // Prune sessions older than the configured retention window to bound the
+        // size of the session index database (see #183). Runs before
+        // scheduleSessionBackfill so pruned sessions are never re-indexed by a
+        // backfill started in the same startup.
+        if (config.sessionRetentionDays && config.sessionRetentionDays > 0) {
+          try {
+            const pruneResult = pruneOldSessions(dbManager, config.sessionRetentionDays);
+            if (pruneResult.sessionsRemoved > 0) {
+              console.info(
+                `🧠 Pruned ${pruneResult.sessionsRemoved} old session(s) (> ${config.sessionRetentionDays} days old)`,
+              );
+            }
+          } catch (err) {
+            console.warn(`⚠️ Session pruning failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
       try {
@@ -258,22 +260,24 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         console.warn(`⚠️ Snapshot retention sweep failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-      scheduleSessionBackfill(dbManager, sessionsDir, {
-        state: backfillState,
-        notify: (message, level) => {
-          const ui = sessionContext?.ui;
-          if (ui?.notify) {
-            ui.notify(message, level);
-          } else if (level === "error" || level === "warning") {
-            console.warn(message);
-          } else {
-            console.info(message);
-          }
-        },
-        // Exclude files older than the retention cutoff so sessions pruned by
-        // retention are never re-indexed and never schedule another backfill.
-        retentionCutoffMs: retentionCutoffMs(config.sessionRetentionDays),
-      });
+      if (config.sessionSearch?.enabled !== false) {
+        scheduleSessionBackfill(dbManager, sessionsDir, {
+          state: backfillState,
+          notify: (message, level) => {
+            const ui = sessionContext?.ui;
+            if (ui?.notify) {
+              ui.notify(message, level);
+            } else if (level === "error" || level === "warning") {
+              console.warn(message);
+            } else {
+              console.info(message);
+            }
+          },
+          // Exclude files older than the retention cutoff so sessions pruned by
+          // retention are never re-indexed and never schedule another backfill.
+          retentionCutoffMs: retentionCutoffMs(config.sessionRetentionDays),
+        });
+      }
     }
   }, async (ctx) => {
     try {
@@ -399,19 +403,25 @@ export default function (pi: ExtensionAPI) {
   if (standingStore) registerStandingPinCommand(pi, standingStore);
 
   // ── 10. Live session indexing ──
-  pi.on("message_end", async (_event, ctx) => {
-    // Cold lazy sessions remain in Pi's JSONL files and are backfilled on use.
-    if (lazy && !initialization.isReady()) return;
-    scheduleLiveSessionIndex(dbManager, ctx.sessionManager, {
-      onError: (err) => console.warn(`⚠️ Live session indexing failed: ${err instanceof Error ? err.message : String(err)}`),
+  if (config.sessionSearch?.enabled !== false) {
+    pi.on("message_end", async (_event, ctx) => {
+      // Cold lazy sessions remain in Pi's JSONL files and are backfilled on use.
+      if (lazy && !initialization.isReady()) return;
+      scheduleLiveSessionIndex(dbManager, ctx.sessionManager, {
+        onError: (err) => console.warn(`⚠️ Live session indexing failed: ${err instanceof Error ? err.message : String(err)}`),
+      });
     });
-  });
+  }
 
   // ── 11. SQLite session search + extended memory ──
-  registerSessionSearchTool(config.sessionSearch?.variant === "anchors" ? pi : memoryPi,
-    dbManager, config.sessionSearch ?? { variant: "legacy" });
+  if (config.sessionSearch?.enabled !== false) {
+    registerSessionSearchTool(config.sessionSearch?.variant === "anchors" ? pi : memoryPi,
+      dbManager, config.sessionSearch ?? { variant: "legacy" });
+  }
   registerMemorySearchTool(memoryPi, dbManager, { usageTrackingEnabled: config.usageHitTrackingEnabled });
-  registerIndexSessionsCommand(memoryPi, config);
+  if (config.sessionSearch?.enabled !== false) {
+    registerIndexSessionsCommand(memoryPi, config);
+  }
 
   // ── 12. Auto-index session on shutdown ──
   // Registered last, so this runs after the session-flush shutdown handler and
@@ -431,38 +441,40 @@ export default function (pi: ExtensionAPI) {
       dbManager.close();
       return;
     }
-    try {
-      measureLifecycleSync("shutdown.active-index", () => {
-        const sessionFile = ctx.sessionManager.getSessionFile();
-        if (sessionFile && fs.existsSync(sessionFile)) {
-          const sessionData = parseSessionFile(sessionFile);
-          if (sessionData) {
-            dbManager.withCorruptionRecovery(() => {
-              indexSession(dbManager, sessionData);
-              // Keep session_files metadata in sync with the final on-disk state.
-              // Pi appends the closing session entry on shutdown after the last
-              // message_end, so without this upsert the stored size/mtime would be
-              // stale and the next startup would re-parse this file unnecessarily.
-              upsertSessionFileMetadata(dbManager, sessionFile, sessionData.id);
-            });
+    if (config.sessionSearch?.enabled !== false) {
+      try {
+        measureLifecycleSync("shutdown.active-index", () => {
+          const sessionFile = ctx.sessionManager.getSessionFile();
+          if (sessionFile && fs.existsSync(sessionFile)) {
+            const sessionData = parseSessionFile(sessionFile);
+            if (sessionData) {
+              dbManager.withCorruptionRecovery(() => {
+                indexSession(dbManager, sessionData);
+                // Keep session_files metadata in sync with the final on-disk state.
+                // Pi appends the closing session entry on shutdown after the last
+                // message_end, so without this upsert the stored size/mtime would be
+                // stale and the next startup would re-parse this file unnecessarily.
+                upsertSessionFileMetadata(dbManager, sessionFile, sessionData.id);
+              });
+            }
           }
-        }
-      });
-    } catch {
-      // Silent fail — don't block shutdown
-    } finally {
-      try {
-        await measureLifecycle("shutdown.index-waits", () => Promise.all([
-          waitForSessionBackfill(SESSION_BACKFILL_SHUTDOWN_TIMEOUT_MS, backfillState),
-          waitForLiveSessionIndex(SESSION_LIVE_INDEX_SHUTDOWN_TIMEOUT_MS),
-        ]));
+        });
       } catch {
-        // Best effort only — shutdown should not be held up by indexing errors.
+        // Silent fail — don't block shutdown
+      } finally {
+        try {
+          await measureLifecycle("shutdown.index-waits", () => Promise.all([
+            waitForSessionBackfill(SESSION_BACKFILL_SHUTDOWN_TIMEOUT_MS, backfillState),
+            waitForLiveSessionIndex(SESSION_LIVE_INDEX_SHUTDOWN_TIMEOUT_MS),
+          ]));
+        } catch {
+          // Best effort only — shutdown should not be held up by indexing errors.
+        }
       }
-      try {
-        databaseClosed = true;
-        measureLifecycleSync("shutdown.database-close", () => dbManager.close());
-      } catch { /* best effort — never block shutdown */ }
     }
+    try {
+      databaseClosed = true;
+      measureLifecycleSync("shutdown.database-close", () => dbManager.close());
+    } catch { /* best effort — never block shutdown */ }
   });
 }

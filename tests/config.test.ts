@@ -549,6 +549,22 @@ describe("loadConfig", () => {
     assert.strictEqual(config.correctionDirectiveWords, undefined);
   });
 
+  it("parses sessionSearch enabled boolean and object forms", () => {
+    fs.mkdirSync(path.dirname(TEST_CONFIG_PATH), { recursive: true });
+
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ sessionSearch: false }));
+    assert.deepStrictEqual(loadConfig(TEST_CONFIG_PATH).sessionSearch, { enabled: false, variant: "legacy" });
+
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ sessionSearch: { enabled: false } }));
+    assert.deepStrictEqual(loadConfig(TEST_CONFIG_PATH).sessionSearch, { enabled: false, variant: "legacy" });
+
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ sessionSearch: { enabled: true, variant: "anchors" } }));
+    assert.deepStrictEqual(loadConfig(TEST_CONFIG_PATH).sessionSearch, { enabled: true, variant: "anchors" });
+
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ sessionSearch: { variant: "anchors" } }));
+    assert.deepStrictEqual(loadConfig(TEST_CONFIG_PATH).sessionSearch, { variant: "anchors" });
+  });
+
   it("defaults usage-hit tracking and consolidation usage signals to enabled", () => {
     fs.mkdirSync(path.dirname(TEST_CONFIG_PATH), { recursive: true });
     fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({}));
