@@ -3,7 +3,7 @@ import type { MemoryConfig } from "./types.js";
 import type { MemoryStore } from "./store/memory-store.js";
 import type { StandingInstructions } from "./store/standing-instructions.js";
 
-type MemoryPolicyConfig = Pick<MemoryConfig, "memoryPolicyStyle" | "memoryPolicyCustomText"> & { skillsEnabled?: boolean };
+type MemoryPolicyConfig = Pick<MemoryConfig, "memoryPolicyStyle" | "memoryPolicyCustomText" | "sessionSearch"> & { skillsEnabled?: boolean };
 
 /** A built-in policy without its skill guidance: the skill paragraph and the skill_manage tool line. */
 function withoutSkillGuidance(prompt: string): string {
@@ -17,20 +17,30 @@ function withoutSkillGuidance(prompt: string): string {
 export function resolveMemoryPolicyPrompt(config: MemoryPolicyConfig): string {
   const style = config.memoryPolicyStyle ?? "full";
   const builtIn = (prompt: string) => (config.skillsEnabled === false ? withoutSkillGuidance(prompt) : prompt);
+  let prompt: string;
 
   switch (style) {
     case "compact":
-      return builtIn(MEMORY_POLICY_PROMPT_COMPACT);
+      prompt = builtIn(MEMORY_POLICY_PROMPT_COMPACT);
+      break;
     case "custom":
-      return config.memoryPolicyCustomText && config.memoryPolicyCustomText.trim().length > 0
+      prompt = config.memoryPolicyCustomText && config.memoryPolicyCustomText.trim().length > 0
         ? config.memoryPolicyCustomText
         : builtIn(MEMORY_POLICY_PROMPT_COMPACT);
+      break;
     case "none":
       return "";
     case "full":
     default:
-      return builtIn(MEMORY_POLICY_PROMPT);
+      prompt = builtIn(MEMORY_POLICY_PROMPT);
+      break;
   }
+
+  if (config.sessionSearch?.enabled === false) {
+    prompt = prompt.replace(/- session_search: search indexed past conversation messages\.\n?/, "");
+  }
+
+  return prompt;
 }
 
 /**
@@ -41,7 +51,7 @@ export function resolveMemoryPolicyPrompt(config: MemoryPolicyConfig): string {
  * operative directive rather than as recalled context.
  */
 export async function buildPromptContext(
-  config: Pick<MemoryConfig, "memoryMode" | "memoryPolicyStyle" | "memoryPolicyCustomText"> & { skillsEnabled?: boolean },
+  config: Pick<MemoryConfig, "memoryMode" | "memoryPolicyStyle" | "memoryPolicyCustomText" | "sessionSearch"> & { skillsEnabled?: boolean },
   store: MemoryStore,
   projectStore: MemoryStore | null,
   projectName: string,

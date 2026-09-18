@@ -13,6 +13,8 @@ export type ThinkingLevel = ModelThinkingLevel;
 export type ReviewTransport = "direct" | "subprocess";
 
 export interface SessionSearchConfig {
+  /** Whether session search and session indexing are enabled. Default: true */
+  enabled?: boolean;
   /** Session search implementation variant. Default: legacy */
   variant: SessionSearchVariant;
 }

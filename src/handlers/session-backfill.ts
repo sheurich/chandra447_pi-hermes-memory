@@ -107,7 +107,7 @@ export function scheduleSessionBackfill(
         try {
           const result = indexSessionsFn(dbManager, sessionsDir, { maxFilesToIndex, retentionCutoffMs, excludeDirs: options.sessionIndexExclude });
           if (!result.reachedLimit) touchBackfillTimestampFn(dbManager);
-          notifyBestEffort(options.notify, formatBackfillResult(result), result.errors.length > 0 || result.reachedLimit ? 'warning' : 'info');
+          notifyBestEffort(options.notify, formatBackfillResult(result), result.errors.length > 0 ? 'warning' : 'info');
         } catch (err) {
           notifyBestEffort(
             options.notify,
