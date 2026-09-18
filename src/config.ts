@@ -190,12 +190,16 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH): MemoryConfig {
         const normalizedProjectsMemoryDir = normalizeProjectsMemoryDir(parsed.projectsMemoryDir);
         if (normalizedProjectsMemoryDir) config.projectsMemoryDir = normalizedProjectsMemoryDir;
       }
-      if (
+      if (parsed.sessionSearch === false) {
+        config.sessionSearch = { enabled: false, variant: "legacy" };
+      } else if (
         typeof parsed.sessionSearch === "object" &&
-        parsed.sessionSearch !== null &&
-        isSessionSearchVariant(parsed.sessionSearch.variant)
+        parsed.sessionSearch !== null
       ) {
-        config.sessionSearch = { variant: parsed.sessionSearch.variant };
+        const raw = parsed.sessionSearch as Record<string, unknown>;
+        const enabled = typeof raw.enabled === "boolean" ? raw.enabled : undefined;
+        const variant = isSessionSearchVariant(raw.variant) ? raw.variant : "legacy";
+        config.sessionSearch = enabled !== undefined ? { enabled, variant } : { variant };
       }
       if (typeof parsed.quickCheckOnOpen === "boolean") config.quickCheckOnOpen = parsed.quickCheckOnOpen;
       if (typeof parsed.llmModelOverride === "string") {

@@ -3,24 +3,34 @@ import type { MemoryConfig } from "./types.js";
 import type { MemoryStore } from "./store/memory-store.js";
 import type { StandingInstructions } from "./store/standing-instructions.js";
 
-type MemoryPolicyConfig = Pick<MemoryConfig, "memoryPolicyStyle" | "memoryPolicyCustomText">;
+type MemoryPolicyConfig = Pick<MemoryConfig, "memoryPolicyStyle" | "memoryPolicyCustomText" | "sessionSearch">;
 
 export function resolveMemoryPolicyPrompt(config: MemoryPolicyConfig): string {
   const style = config.memoryPolicyStyle ?? "full";
+  let prompt: string;
 
   switch (style) {
     case "compact":
-      return MEMORY_POLICY_PROMPT_COMPACT;
+      prompt = MEMORY_POLICY_PROMPT_COMPACT;
+      break;
     case "custom":
-      return config.memoryPolicyCustomText && config.memoryPolicyCustomText.trim().length > 0
+      prompt = config.memoryPolicyCustomText && config.memoryPolicyCustomText.trim().length > 0
         ? config.memoryPolicyCustomText
         : MEMORY_POLICY_PROMPT_COMPACT;
+      break;
     case "none":
       return "";
     case "full":
     default:
-      return MEMORY_POLICY_PROMPT;
+      prompt = MEMORY_POLICY_PROMPT;
+      break;
   }
+
+  if (config.sessionSearch?.enabled === false) {
+    prompt = prompt.replace(/- session_search: search indexed past conversation messages\.\n?/, "");
+  }
+
+  return prompt;
 }
 
 /**
@@ -31,7 +41,7 @@ export function resolveMemoryPolicyPrompt(config: MemoryPolicyConfig): string {
  * operative directive rather than as recalled context.
  */
 export async function buildPromptContext(
-  config: Pick<MemoryConfig, "memoryMode" | "memoryPolicyStyle" | "memoryPolicyCustomText">,
+  config: Pick<MemoryConfig, "memoryMode" | "memoryPolicyStyle" | "memoryPolicyCustomText" | "sessionSearch">,
   store: MemoryStore,
   projectStore: MemoryStore | null,
   projectName: string,
