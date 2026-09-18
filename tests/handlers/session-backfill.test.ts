@@ -137,7 +137,7 @@ describe('session backfill handler', () => {
     assert.equal(scheduled, true);
     await state.promise;
     assert.equal(touched, false);
-    assert.equal(notifications[0].level, 'warning');
+    assert.equal(notifications[0].level, 'info');
     assert.match(notifications[0].message, /startup limit reached/);
   });
 

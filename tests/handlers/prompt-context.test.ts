@@ -163,4 +163,17 @@ describe("buildPromptContext", () => {
 
     assert.strictEqual(result, MEMORY_POLICY_PROMPT);
   });
+
+  it("omits session_search tool from available tools when sessionSearch is disabled", async () => {
+    const result = await buildPromptContext(
+      { memoryMode: "policy-only", sessionSearch: { enabled: false, variant: "legacy" } },
+      store,
+      projectStore,
+      "demo",
+    );
+
+    assert.doesNotMatch(result, /session_search/);
+    assert.match(result, /memory_search/);
+    assert.match(result, /skill_manage/);
+  });
 });
