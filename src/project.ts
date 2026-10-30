@@ -81,6 +81,71 @@ function resolveWorktreeCommonDir(worktreeRoot: string, dotGitFile: string): str
 
 const repoRootCache = new Map<string, string | null>();
 
+function resolveWorkspaceInitiative(
+  resolved: string,
+  resolvedHome: string,
+  repoRoot: string | null,
+): string | null {
+  const wsRoot = path.join(resolvedHome, "workspaces");
+
+  // 1. Direct path under ~/workspaces/<initiative>[/...] or ~/workspaces/.worktrees/<initiative>/...
+  if (resolved.startsWith(wsRoot + path.sep)) {
+    const rel = resolved.slice(wsRoot.length + 1);
+    const parts = rel.split(path.sep).filter(Boolean);
+    if (parts[0] === ".worktrees" && parts.length >= 2) {
+      const candidate = parts[1];
+      if (candidate && !candidate.startsWith(".") && !candidate.startsWith("_")) {
+        return candidate;
+      }
+    } else if (parts.length >= 1) {
+      const candidate = parts[0];
+      if (candidate && !candidate.startsWith(".") && !candidate.startsWith("_")) {
+        return candidate;
+      }
+    }
+  }
+
+  // 2. Symlinked member checkout when PI_INTERCOM_SCOPE_ID points to ~/workspaces/<initiative>
+  const scopeRaw = process.env.PI_INTERCOM_SCOPE_ID?.trim();
+  if (scopeRaw) {
+    const scopeDir = path.resolve(scopeRaw);
+    if (scopeDir.startsWith(wsRoot + path.sep)) {
+      const rel = scopeDir.slice(wsRoot.length + 1);
+      const parts = rel.split(path.sep).filter(Boolean);
+      const initiative = parts[0];
+      if (
+        parts.length === 1
+        && initiative
+        && !initiative.startsWith(".")
+        && !initiative.startsWith("_")
+      ) {
+        if (resolved === scopeDir || resolved.startsWith(scopeDir + path.sep)) {
+          return initiative;
+        }
+        try {
+          const entries = fs.readdirSync(scopeDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.name.startsWith(".")) continue;
+            if (!entry.isSymbolicLink() && !entry.isDirectory()) continue;
+            const memberReal = fs.realpathSync(path.join(scopeDir, entry.name));
+            if (
+              resolved === memberReal
+              || resolved.startsWith(memberReal + path.sep)
+              || (repoRoot && (repoRoot === memberReal || repoRoot.startsWith(memberReal + path.sep)))
+            ) {
+              return initiative;
+            }
+          }
+        } catch {
+          // Ignore unreadable workspace directories
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Detect project from the current working directory.
  *
@@ -109,7 +174,7 @@ export function detectProject(projectsMemoryDir = "projects-memory", cwd?: strin
   }
 
   const cwdName = path.basename(resolved);
-  if (!cwdName || cwdName === "." || cwdName === "..") {
+  if (!cwdName || cwdName === "." || cwdName === ".." || cwdName === "tmp" || cwdName.startsWith("tmp.")) {
     return { name: null, memoryDir: null };
   }
 
@@ -120,6 +185,19 @@ export function detectProject(projectsMemoryDir = "projects-memory", cwd?: strin
     name,
     memoryDir: path.join(projectsRoot, name),
   };
+}
+
+function stripBareGitSuffix(name: string): string {
+  return name.endsWith(".git") && name.length > 4 ? name.slice(0, -4) : name;
+}
+
+function hasPopulatedStore(projectsRoot: string, name: string): boolean {
+  const dir = path.join(projectsRoot, name);
+  return (
+    fs.existsSync(path.join(dir, "MEMORY.md"))
+    || fs.existsSync(path.join(dir, "USER.md"))
+    || fs.existsSync(path.join(dir, "failures.md"))
+  );
 }
 
 function resolveProjectName(
@@ -134,15 +212,36 @@ function resolveProjectName(
     repoRootCache.set(resolved, repoRoot);
   }
 
-  if (!repoRoot || repoRoot === resolved || repoRoot === resolvedHome) return cwdName;
+  const normalizedCwdName = stripBareGitSuffix(cwdName);
+  const repoName = repoRoot && repoRoot !== resolvedHome
+    ? stripBareGitSuffix(path.basename(repoRoot))
+    : normalizedCwdName;
 
-  const repoName = path.basename(repoRoot);
-  if (!repoName || repoName === cwdName) return cwdName;
+  const workspaceInitiative = resolveWorkspaceInitiative(resolved, resolvedHome, repoRoot);
+  if (workspaceInitiative) {
+    if (
+      repoName !== workspaceInitiative
+      && hasPopulatedStore(projectsRoot, repoName)
+      && !hasPopulatedStore(projectsRoot, workspaceInitiative)
+    ) {
+      return repoName;
+    }
+    return workspaceInitiative;
+  }
+
+  if (!repoRoot || repoRoot === resolved || repoRoot === resolvedHome) {
+    if (cwdName !== normalizedCwdName && hasPopulatedStore(projectsRoot, cwdName)) {
+      return cwdName;
+    }
+    return normalizedCwdName;
+  }
+
+  if (!repoName || repoName === normalizedCwdName) return normalizedCwdName;
 
   // Migration bridge: a store already written under the old cwd-basename
   // identity keeps working. Only fresh directories adopt the repository name.
-  if (!fs.existsSync(path.join(projectsRoot, repoName)) && fs.existsSync(path.join(projectsRoot, cwdName))) {
-    return cwdName;
+  if (!fs.existsSync(path.join(projectsRoot, repoName)) && fs.existsSync(path.join(projectsRoot, normalizedCwdName))) {
+    return normalizedCwdName;
   }
 
   return repoName;

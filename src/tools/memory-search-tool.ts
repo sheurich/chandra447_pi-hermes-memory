@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { DatabaseManager } from '../store/db.js';
 import { searchMemories, getMemoryStats, recordSearchHits } from '../store/sqlite-memory-store.js';
+import { resolveProjectName, type ProjectNameRef } from '../project-context.js';
 import type { MemoryCategory } from '../types.js';
 import { createSharedToolResultRenderer } from './shared-output-view.js';
 import { searchResultView } from './tool-result-views.js';
@@ -27,7 +28,7 @@ function scopeLabel(project: string | null): string {
 export function registerMemorySearchTool(
   pi: ExtensionAPI,
   dbManager: DatabaseManager,
-  options: { usageTrackingEnabled?: boolean } = {},
+  options: { usageTrackingEnabled?: boolean; projectName?: ProjectNameRef } = {},
 ): void {
   pi.registerTool({
     name: 'memory_search',
@@ -59,8 +60,13 @@ Returns matching memory entries with their mutation target, scope, and dates. Th
     }),
     execute: async (_id: string, args: { query: string; project?: string; target?: 'memory' | 'user' | 'failure' | 'project'; category?: string; limit?: number }) => {
       const query = args.query;
-      const project = args.project;
       const target = args.target;
+      const activeProject = options.projectName ? resolveProjectName(options.projectName) : null;
+      const project = args.project === '*'
+        ? undefined
+        : args.project !== undefined
+          ? args.project
+          : (target === 'project' && activeProject ? activeProject : undefined);
       const category = args.category as MemoryCategory | undefined;
       const limit = Math.min(args.limit || 10, 20);
 

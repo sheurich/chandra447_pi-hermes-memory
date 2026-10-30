@@ -419,7 +419,10 @@ export default function (pi: ExtensionAPI) {
     registerSessionSearchTool(config.sessionSearch?.variant === "anchors" ? pi : memoryPi,
       dbManager, config.sessionSearch ?? { variant: "legacy" });
   }
-  registerMemorySearchTool(memoryPi, dbManager, { usageTrackingEnabled: config.usageHitTrackingEnabled });
+  registerMemorySearchTool(memoryPi, dbManager, {
+    usageTrackingEnabled: config.usageHitTrackingEnabled,
+    projectName: projectNameRef,
+  });
   if (config.sessionSearch?.enabled !== false) {
     registerIndexSessionsCommand(memoryPi, config);
   }
