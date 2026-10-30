@@ -180,4 +180,27 @@ describe('registerMemorySearchTool', () => {
 
     dbManager.close();
   });
+
+  it('defaults target="project" queries to active projectName unless project is explicitly set', async () => {
+    const dbManager = makeDbManager();
+    addMemory(dbManager, 'alpha project rule', 'memory', 'project-alpha');
+    addMemory(dbManager, 'beta project rule', 'memory', 'project-beta');
+
+    let captured: any;
+    registerMemorySearchTool(
+      { registerTool: (def: any) => { captured = def; } } as any,
+      dbManager,
+      { projectName: () => 'project-alpha' },
+    );
+
+    const scoped = await captured.execute('tc-1', { query: 'rule', target: 'project' });
+    assert.strictEqual(scoped.details.count, 1);
+    assert.match(scoped.content[0].text, /project-alpha/);
+    assert.doesNotMatch(scoped.content[0].text, /project-beta/);
+
+    const wildcard = await captured.execute('tc-2', { query: 'rule', target: 'project', project: '*' });
+    assert.strictEqual(wildcard.details.count, 2);
+
+    dbManager.close();
+  });
 });

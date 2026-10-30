@@ -117,4 +117,35 @@ describe("git worktree project identity (#120)", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("maps ~/workspaces/<initiative> paths and worktrees to the initiative name", () => {
+    const wsPath = path.join(os.homedir(), "workspaces", "demo-initiative", "subrepo", "pkg");
+    const wtPath = path.join(os.homedir(), "workspaces", ".worktrees", "demo-initiative", "feat-branch");
+    assert.strictEqual(detectProject("projects-memory", wsPath).name, "demo-initiative");
+    assert.strictEqual(detectProject("projects-memory", wtPath).name, "demo-initiative");
+  });
+
+  it("maps symlinked member repos via PI_INTERCOM_SCOPE_ID to the workspace initiative", () => {
+    const wsDir = path.join(os.homedir(), "workspaces", "test-ws-scope-" + process.pid);
+    const externalRepo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-ext-repo-")));
+    const prevScope = process.env.PI_INTERCOM_SCOPE_ID;
+    try {
+      fs.mkdirSync(wsDir, { recursive: true });
+      fs.symlinkSync(externalRepo, path.join(wsDir, "member-repo"));
+      process.env.PI_INTERCOM_SCOPE_ID = wsDir;
+      assert.strictEqual(detectProject("projects-memory", externalRepo).name, path.basename(wsDir));
+    } finally {
+      if (prevScope === undefined) delete process.env.PI_INTERCOM_SCOPE_ID;
+      else process.env.PI_INTERCOM_SCOPE_ID = prevScope;
+      fs.rmSync(wsDir, { recursive: true, force: true });
+      fs.rmSync(externalRepo, { recursive: true, force: true });
+    }
+  });
+
+  it("strips trailing .git suffix from bare-repo directory names and rejects tmp.* dirs", () => {
+    const bareDir = "/tmp/ca-boulder.git";
+    assert.strictEqual(detectProject("projects-memory", bareDir).name, "ca-boulder");
+    assert.strictEqual(detectProject("projects-memory", "/tmp/tmp.M23k7be8TF").name, null);
+    assert.strictEqual(detectProject("projects-memory", "/tmp").name, null);
+  });
 });
