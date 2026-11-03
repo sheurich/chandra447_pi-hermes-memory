@@ -4,8 +4,15 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { detectProject, detectProjectSkills } from "../src/project.js";
+import { detectProject, detectProjectSkills, isScratchRoot } from "../src/project.js";
 import { AGENT_ROOT } from "../src/paths.js";
+
+/**
+ * A non-repository project path that is NOT under a scratch root. It need not
+ * exist: detectProject only stats for `.git` on the way up, and `$HOME` itself
+ * is excluded from repository identity, so the basename rule applies.
+ */
+const NON_SCRATCH_PROJECT_DIR = path.join(os.homedir(), "src", "demo-repo");
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, {
@@ -44,7 +51,7 @@ describe("project detection", () => {
   });
 
   it("detectProject resolves the project memory directory from cwd", () => {
-    const cwd = "/tmp/demo-repo";
+    const cwd = NON_SCRATCH_PROJECT_DIR;
     const result = detectProject("projects-memory", cwd);
 
     assert.strictEqual(result.name, "demo-repo");
@@ -55,7 +62,7 @@ describe("project detection", () => {
   });
 
   it("detectProjectSkills appends the skills directory for dynamic discovery", () => {
-    const cwd = "/tmp/demo-repo";
+    const cwd = NON_SCRATCH_PROJECT_DIR;
     const result = detectProjectSkills("projects-memory", cwd);
 
     assert.strictEqual(result.name, "demo-repo");
@@ -110,12 +117,10 @@ describe("git worktree project identity (#120)", () => {
   });
 
   it("falls back to the directory basename outside a repository", () => {
-    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-nogit-")));
-    try {
-      assert.strictEqual(detectProject("projects-memory", dir).name, path.basename(dir));
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    assert.strictEqual(
+      detectProject("projects-memory", NON_SCRATCH_PROJECT_DIR).name,
+      path.basename(NON_SCRATCH_PROJECT_DIR),
+    );
   });
 
   it("maps ~/workspaces/<initiative> paths and worktrees to the initiative name", () => {
@@ -142,10 +147,66 @@ describe("git worktree project identity (#120)", () => {
     }
   });
 
-  it("strips trailing .git suffix from bare-repo directory names and rejects tmp.* dirs", () => {
-    const bareDir = "/tmp/ca-boulder.git";
+  it("strips trailing .git suffix from bare-repo directory names outside scratch roots", () => {
+    const bareDir = path.join(os.homedir(), "src", "ca-boulder.git");
     assert.strictEqual(detectProject("projects-memory", bareDir).name, "ca-boulder");
+  });
+
+  it("rejects tmp.* dirs and the /tmp root itself", () => {
     assert.strictEqual(detectProject("projects-memory", "/tmp/tmp.M23k7be8TF").name, null);
     assert.strictEqual(detectProject("projects-memory", "/tmp").name, null);
+  });
+});
+
+describe("scratch roots never mint a project identity without a repository", () => {
+  it("isScratchRoot recognizes the temp roots and their children", () => {
+    assert.strictEqual(isScratchRoot("/tmp"), true);
+    assert.strictEqual(isScratchRoot("/tmp/x"), true);
+    assert.strictEqual(isScratchRoot("/private/tmp/x"), true);
+    assert.strictEqual(isScratchRoot("/var/folders/ab/cd/T/x"), true);
+    assert.strictEqual(isScratchRoot("/private/var/folders/ab/cd/T/x"), true);
+    assert.strictEqual(isScratchRoot(path.join(os.tmpdir(), "pi-live-verify-abc")), true);
+    assert.strictEqual(isScratchRoot(path.join(fs.realpathSync(os.tmpdir()), "pi-live-verify-abc")), true);
+    assert.strictEqual(isScratchRoot(NON_SCRATCH_PROJECT_DIR), false);
+    assert.strictEqual(isScratchRoot("/tmpfoo/x"), false);
+  });
+
+  it("returns null for a bare .git clone under /tmp", () => {
+    assert.deepStrictEqual(detectProject("projects-memory", "/tmp/ca-boulder.git"), { name: null, memoryDir: null });
+  });
+
+  it("returns null for non-repository directories under /private/tmp and os.tmpdir()", () => {
+    assert.deepStrictEqual(detectProject("projects-memory", "/private/tmp/x"), { name: null, memoryDir: null });
+    assert.deepStrictEqual(
+      detectProject("projects-memory", path.join(os.tmpdir(), "pi-live-verify-abc")),
+      { name: null, memoryDir: null },
+    );
+    assert.strictEqual(detectProjectSkills("projects-memory", "/private/tmp/x").skillsDir, null);
+  });
+
+  it("returns null for an existing non-repository scratch directory", () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-nogit-")));
+    try {
+      assert.deepStrictEqual(detectProject("projects-memory", dir), { name: null, memoryDir: null });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still resolves a git-initialized working repository under os.tmpdir()", () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-scratch-repo-")));
+    const repo = path.join(root, "scratch-repo");
+    try {
+      fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+      git(root, "init", "-q", "-b", "main", "scratch-repo");
+      assert.strictEqual(detectProject("projects-memory", repo).name, "scratch-repo");
+      assert.strictEqual(detectProject("projects-memory", path.join(repo, "src")).name, "scratch-repo");
+      assert.strictEqual(
+        detectProject("projects-memory", repo).memoryDir,
+        path.join(AGENT_ROOT, "projects-memory", "scratch-repo"),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

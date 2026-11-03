@@ -81,6 +81,38 @@ function resolveWorktreeCommonDir(worktreeRoot: string, dotGitFile: string): str
 
 const repoRootCache = new Map<string, string | null>();
 
+/**
+ * Directories whose contents are throwaway by convention. A non-repository
+ * directory under one of these (`mktemp -d`, a bare `.git` clone, a one-off
+ * verification folder) must not mint a `projects-memory/<name>/` identity.
+ */
+function scratchRoots(): string[] {
+  const roots = new Set<string>();
+  const addRoot = (candidate: string | undefined, followSymlinks: boolean): void => {
+    if (!candidate) return;
+    const resolved = path.resolve(candidate);
+    roots.add(resolved);
+    if (!followSymlinks) return;
+    try {
+      roots.add(fs.realpathSync(resolved));
+    } catch {
+      // Unresolvable temp dir — keep the literal path only.
+    }
+  };
+
+  addRoot(os.tmpdir(), true);
+  addRoot(process.env.TMPDIR, true);
+  for (const fixedRoot of ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]) {
+    addRoot(fixedRoot, false);
+  }
+  return [...roots];
+}
+
+export function isScratchRoot(resolved: string): boolean {
+  const target = path.resolve(resolved);
+  return scratchRoots().some((root) => target === root || target.startsWith(root + path.sep));
+}
+
 function resolveWorkspaceInitiative(
   resolved: string,
   resolvedHome: string,
@@ -180,6 +212,7 @@ export function detectProject(projectsMemoryDir = "projects-memory", cwd?: strin
 
   const projectsRoot = resolveProjectsRoot(projectsMemoryDir);
   const name = resolveProjectName(resolved, resolvedHome, cwdName, projectsRoot);
+  if (!name) return { name: null, memoryDir: null };
 
   return {
     name,
@@ -205,7 +238,7 @@ function resolveProjectName(
   resolvedHome: string,
   cwdName: string,
   projectsRoot: string,
-): string {
+): string | null {
   let repoRoot = repoRootCache.get(resolved);
   if (repoRoot === undefined) {
     repoRoot = findGitRepoRoot(resolved);
@@ -228,6 +261,10 @@ function resolveProjectName(
     }
     return workspaceInitiative;
   }
+
+  // A scratch directory is only a project when a real repository with a
+  // working tree lives there (tests and tooling `git init` under os.tmpdir()).
+  if (!repoRoot && isScratchRoot(resolved)) return null;
 
   if (!repoRoot || repoRoot === resolved || repoRoot === resolvedHome) {
     if (cwdName !== normalizedCwdName && hasPopulatedStore(projectsRoot, cwdName)) {

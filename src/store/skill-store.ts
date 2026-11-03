@@ -198,11 +198,14 @@ export class SkillStore {
     this.projectSkillsDir = projectSkillsDir;
   }
 
+  /**
+   * Only the global root is created up front. The project skills directory is
+   * created lazily by the first project-scope write (`create`, `patch`,
+   * `edit`/`update` all mkdir their target), so merely opening a session in a
+   * project never leaves an empty `projects-memory/<name>/skills/` behind.
+   */
   async ensureDiscoveredRoots(): Promise<void> {
     await fs.mkdir(this.globalSkillsDir, { recursive: true });
-    if (this.projectSkillsDir) {
-      await fs.mkdir(this.projectSkillsDir, { recursive: true });
-    }
   }
 
   async migrateLegacySkills(): Promise<LegacySkillMigrationResult> {

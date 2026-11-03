@@ -657,6 +657,32 @@ describe("SkillStore", { concurrency: 1 }, () => {
     });
   });
 
+  describe("ensureDiscoveredRoots()", () => {
+    it("creates only the global root; the project skills dir waits for the first write", async () => {
+      const lazyProjectDir = path.join(ROOT_DIR, "lazy-project", "skills");
+      await fs.rm(GLOBAL_SKILLS_DIR, { recursive: true, force: true });
+      const store = await makeStore();
+      store.setProjectContext("lazy-project", lazyProjectDir);
+
+      await store.ensureDiscoveredRoots();
+
+      assert.strictEqual((await fs.stat(GLOBAL_SKILLS_DIR)).isDirectory(), true);
+      await assert.rejects(fs.stat(lazyProjectDir), { code: "ENOENT" });
+      await assert.rejects(fs.stat(path.dirname(lazyProjectDir)), { code: "ENOENT" });
+
+      const result = await store.create(
+        "Lazy Project Skill",
+        "Created after startup",
+        "## Procedure\n1. Run it",
+        "project",
+      );
+
+      assert.ok(result.success, `create failed: ${result.error}`);
+      assert.strictEqual((await fs.stat(lazyProjectDir)).isDirectory(), true);
+      await fs.access(path.join(lazyProjectDir, "lazy-project-skill", "SKILL.md"));
+    });
+  });
+
   describe("dynamic project context", () => {
     it("can retarget project skill creation to a new project directory", async () => {
       const store = await makeStore();
