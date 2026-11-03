@@ -6,6 +6,10 @@ import { resolveProjectSkillDiscovery, registerProjectSkillDiscoveryHandler } fr
 import { AGENT_ROOT } from "../../src/paths.js";
 import { SkillStore } from "../../src/store/skill-store.js";
 
+// Not under a scratch root: a non-repository directory under /tmp is no
+// longer a project (see tests/project.test.ts).
+const PROJECT_CWD = path.join(os.homedir(), "src", "demo-repo");
+
 describe("resources_discover skill path resolution", () => {
   it("registers resources_discover and returns skillPaths from handler", async () => {
     const store = new SkillStore({
@@ -26,7 +30,7 @@ describe("resources_discover skill path resolution", () => {
     registerProjectSkillDiscoveryHandler(pi, store, "projects-memory");
     assert.ok(typeof handlers.resources_discover === "function");
 
-    const result = await handlers.resources_discover({ cwd: "/tmp/demo-repo" }, {});
+    const result = await handlers.resources_discover({ cwd: PROJECT_CWD }, {});
     const expectedPath = path.join(AGENT_ROOT, "projects-memory", "demo-repo", "skills");
 
     assert.deepStrictEqual(result, { skillPaths: ["/tmp/global-skills", expectedPath] });
@@ -41,7 +45,7 @@ describe("resources_discover skill path resolution", () => {
       migrationSentinelPath: "/tmp/.skills-migrated",
     });
 
-    const cwd = "/tmp/demo-repo";
+    const cwd = PROJECT_CWD;
     const resource = resolveProjectSkillDiscovery(store, "projects-memory", cwd);
     const expectedPath = path.join(AGENT_ROOT, "projects-memory", "demo-repo", "skills");
 

@@ -154,11 +154,12 @@ export default function (pi: ExtensionAPI) {
   // Bound from session/tool ctx.cwd, never from factory process.cwd().
   const createProjectStore = (projectInfo: ReturnType<typeof detectProject>): MemoryStore | null => {
     if (!projectInfo.memoryDir) return null;
+    // The project directory is created by the first write, not by session start.
     return new MemoryStore({
       ...config,
       memoryCharLimit: config.projectCharLimit,
       memoryDir: projectInfo.memoryDir,
-    });
+    }, { createDirOnLoad: false });
   };
   let projectMemoryDir: string | null = null;
   let projectStore: MemoryStore | null = null;

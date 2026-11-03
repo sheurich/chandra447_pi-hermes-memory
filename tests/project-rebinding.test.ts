@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { rmTestDir } from "./helpers/cleanup.js";
+import { initScratchProject } from "./helpers/scratch-project.js";
 
 interface MockPi {
   handlers: Record<string, Array<(event: any, ctx: any) => unknown>>;
@@ -16,8 +17,10 @@ interface MockPi {
 describe("session project memory rebinding", () => {
   it("writes project memory using session cwd when factory cwd differs", async () => {
     const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-project-rebind-agent-"));
-    const launchDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-project-rebind-launch-"));
-    const targetDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-project-rebind-target-"));
+    // Both must be real working-tree repositories: a non-repository scratch
+    // directory is not a project.
+    const launchDir = initScratchProject(await fs.mkdtemp(path.join(os.tmpdir(), "pi-project-rebind-launch-")));
+    const targetDir = initScratchProject(await fs.mkdtemp(path.join(os.tmpdir(), "pi-project-rebind-target-")));
     const previousAgentRoot = process.env.PI_CODING_AGENT_DIR;
     const previousCwd = process.cwd();
     try {

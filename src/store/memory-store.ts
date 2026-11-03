@@ -53,6 +53,15 @@ const CONFLICT_MAX_BYTES = 64 * 1024 * 1024;
 
 class ExternalMemoryWriteConflict extends Error {}
 
+export interface MemoryStoreOptions {
+  /**
+   * Create `memoryDir` during `loadFromDisk()`. Default: true. Project stores
+   * pass false so opening a session never materializes an empty
+   * `projects-memory/<name>/`; the directory is created by the first write.
+   */
+  createDirOnLoad?: boolean;
+}
+
 export class MemoryStore {
   private memoryEntries: string[] = [];
   private userEntries: string[] = [];
@@ -64,7 +73,11 @@ export class MemoryStore {
   private overflowSince: Partial<Record<"memory" | "user" | "failure", number>> = {};
   private mutationObserver: ((target: "memory" | "user" | "failure", entries: string[]) => Promise<string | null | undefined>) | null = null;
 
-  constructor(private config: MemoryConfig) {}
+  private readonly createDirOnLoad: boolean;
+
+  constructor(private config: MemoryConfig, options: MemoryStoreOptions = {}) {
+    this.createDirOnLoad = options.createDirOnLoad ?? true;
+  }
 
   /**
    * Inject a consolidation function (avoids circular imports).
@@ -173,7 +186,9 @@ export class MemoryStore {
   // ─── Load from disk ───
 
   async loadFromDisk(): Promise<void> {
-    await fs.mkdir(this.memoryDir, { recursive: true });
+    // readFileState treats a missing directory like a missing file (ENOENT),
+    // so a store that defers directory creation loads as empty.
+    if (this.createDirOnLoad) await fs.mkdir(this.memoryDir, { recursive: true });
     for (const target of ["memory", "user", "failure"] as const) {
       const filePath = await this.resolveStoragePath(target);
       const state = await this.readFileState(filePath);
@@ -963,6 +978,8 @@ export class MemoryStore {
     const content = entries.length ? entries.join(ENTRY_DELIMITER) : "";
     const expectedFingerprint = this.fileFingerprints[filePath] ?? "missing";
 
+    // The directory may not exist yet when createDirOnLoad is false.
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
     // Use the memory directory for temp files so rename stays on the same device
     const tmpDir = await fs.mkdtemp(path.join(path.dirname(filePath), ".tmp-"));
     const tmpPath = path.join(tmpDir, "write.tmp");

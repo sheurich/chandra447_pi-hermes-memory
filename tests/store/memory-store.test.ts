@@ -1269,6 +1269,67 @@ describe("MemoryStore", { concurrency: 1 }, () => {
     });
   });
 
+  // ─── Lazy directory creation ───
+
+  describe("createDirOnLoad", () => {
+    it("creates the memory directory on load by default", async () => {
+      const lazyDir = path.join(MEMORY_DIR, "lazy-default", "project");
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+
+      const store = new MemoryStore(makeConfig({ memoryDir: lazyDir }));
+      await store.loadFromDisk();
+
+      assert.equal((await fs.stat(lazyDir)).isDirectory(), true);
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+    });
+
+    it("with createDirOnLoad: false, loadFromDisk() tolerates a missing directory and does not create it", async () => {
+      const lazyDir = path.join(MEMORY_DIR, "lazy-project", "project");
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+
+      const store = new MemoryStore(makeConfig({ memoryDir: lazyDir }), { createDirOnLoad: false });
+      await store.loadFromDisk();
+
+      await assert.rejects(fs.stat(lazyDir), { code: "ENOENT" });
+      await assert.rejects(fs.stat(path.dirname(lazyDir)), { code: "ENOENT" });
+      assert.deepEqual(store.getMemoryEntries(), []);
+      assert.deepEqual(store.getUserEntries(), []);
+      assert.deepEqual(store.getAllFailureEntries(), []);
+      assert.equal(store.formatForSystemPrompt(), "");
+      assert.equal(store.formatProjectBlock("lazy-project"), "");
+
+      // Read-only maintenance must not materialize the directory either.
+      await store.maintainRecoveryFiles();
+      await assert.rejects(fs.stat(lazyDir), { code: "ENOENT" });
+
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+    });
+
+    it("with createDirOnLoad: false, the first write creates the directory and persists the entry", async () => {
+      const lazyDir = path.join(MEMORY_DIR, "lazy-write", "project");
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+
+      const store = new MemoryStore(makeConfig({ memoryDir: lazyDir }), { createDirOnLoad: false });
+      await store.loadFromDisk();
+      await assert.rejects(fs.stat(lazyDir), { code: "ENOENT" });
+
+      const result = await store.add("memory", `${TEST_MARKER} lazily created`);
+      await settle();
+
+      assert.ok(result.success, `add failed: ${result.error}`);
+      assert.equal((await fs.stat(lazyDir)).isDirectory(), true);
+      const raw = await readRaw(path.join(lazyDir, MEMORY_FILE));
+      assert.ok(raw.includes(`${TEST_MARKER} lazily created`));
+
+      // A fresh store sees the persisted entry.
+      const reloaded = new MemoryStore(makeConfig({ memoryDir: lazyDir }), { createDirOnLoad: false });
+      await reloaded.loadFromDisk();
+      assert.deepEqual(reloaded.getMemoryEntries(), [`${TEST_MARKER} lazily created`]);
+
+      await fs.rm(path.dirname(lazyDir), { recursive: true, force: true });
+    });
+  });
+
   // ─── Both targets ───
 
   describe("both targets", () => {

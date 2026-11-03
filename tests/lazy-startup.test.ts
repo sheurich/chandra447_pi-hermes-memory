@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, beforeEach, afterEach, describe, it } from "node:test";
 import { rmTestDir } from "./helpers/cleanup.js";
+import { initScratchProject } from "./helpers/scratch-project.js";
 
 // Bind the entry point to a disposable agent root, never the user's memory.
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-lazy-startup-"));
@@ -65,7 +66,7 @@ async function writeSession() {
 beforeEach(async () => {
   await fs.mkdir(globalDir, { recursive: true });
   await fs.mkdir(projectDir, { recursive: true });
-  await fs.mkdir(cwd, { recursive: true });
+  initScratchProject(cwd);
   await fs.writeFile(path.join(globalDir, "MEMORY.md"), "durable global fact");
   await fs.writeFile(path.join(projectDir, "MEMORY.md"), "durable project fact");
   await fs.writeFile(path.join(globalDir, "STANDING.md"), "- Always ask before deployment.\n");
