@@ -137,8 +137,11 @@ function resolveWorkspaceInitiative(
     }
   }
 
-  // 2. Symlinked member checkout when PI_INTERCOM_SCOPE_ID points to ~/workspaces/<initiative>
-  const scopeRaw = process.env.PI_INTERCOM_SCOPE_ID?.trim();
+  // 2. Symlinked member checkout when PI_HERMES_MEMORY_SCOPE (or, only when that is
+  //    unset/blank, legacy PI_INTERCOM_SCOPE_ID) points to ~/workspaces/<initiative>.
+  //    /intercom-pool mutates the legacy variable in-process, so it stays a fallback.
+  const scopeRaw = process.env.PI_HERMES_MEMORY_SCOPE?.trim()
+    || process.env.PI_INTERCOM_SCOPE_ID?.trim();
   if (scopeRaw) {
     const scopeDir = path.resolve(scopeRaw);
     if (scopeDir.startsWith(wsRoot + path.sep)) {
