@@ -133,18 +133,127 @@ describe("git worktree project identity (#120)", () => {
   it("maps symlinked member repos via PI_INTERCOM_SCOPE_ID to the workspace initiative", () => {
     const wsDir = path.join(os.homedir(), "workspaces", "test-ws-scope-" + process.pid);
     const externalRepo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-ext-repo-")));
+    const prevHermesScope = process.env.PI_HERMES_MEMORY_SCOPE;
     const prevScope = process.env.PI_INTERCOM_SCOPE_ID;
     try {
       fs.mkdirSync(wsDir, { recursive: true });
       fs.symlinkSync(externalRepo, path.join(wsDir, "member-repo"));
+      delete process.env.PI_HERMES_MEMORY_SCOPE;
       process.env.PI_INTERCOM_SCOPE_ID = wsDir;
       assert.strictEqual(detectProject("projects-memory", externalRepo).name, path.basename(wsDir));
     } finally {
+      if (prevHermesScope === undefined) delete process.env.PI_HERMES_MEMORY_SCOPE;
+      else process.env.PI_HERMES_MEMORY_SCOPE = prevHermesScope;
       if (prevScope === undefined) delete process.env.PI_INTERCOM_SCOPE_ID;
       else process.env.PI_INTERCOM_SCOPE_ID = prevScope;
       fs.rmSync(wsDir, { recursive: true, force: true });
       fs.rmSync(externalRepo, { recursive: true, force: true });
     }
+  });
+
+  describe("PI_HERMES_MEMORY_SCOPE", () => {
+    const SCOPE_VARS = ["PI_HERMES_MEMORY_SCOPE", "PI_INTERCOM_SCOPE_ID"] as const;
+
+    /**
+     * A git repository under os.tmpdir() plus helpers to expose it as a symlinked
+     * member of one or more ~/workspaces/<initiative> directories. The repository
+     * basename is the expected project when no initiative scope applies.
+     */
+    function withScopeFixture(
+      run: (fx: { repo: string; repoName: string; makeInitiative: (name: string) => string }) => void,
+    ): void {
+      const saved = SCOPE_VARS.map((name) => [name, process.env[name]] as const);
+      const tag = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-scope-")));
+      const repoName = `scope-member-${tag}`;
+      const repo = path.join(root, repoName);
+      const initiatives: string[] = [];
+      try {
+        for (const name of SCOPE_VARS) delete process.env[name];
+        fs.mkdirSync(repo, { recursive: true });
+        git(root, "init", "-q", "-b", "main", repoName);
+        const makeInitiative = (name: string): string => {
+          const dir = path.join(os.homedir(), "workspaces", `${name}-${tag}`);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.symlinkSync(repo, path.join(dir, "member-repo"));
+          initiatives.push(dir);
+          return dir;
+        };
+        run({ repo, repoName, makeInitiative });
+      } finally {
+        for (const [name, value] of saved) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+        for (const dir of initiatives) fs.rmSync(dir, { recursive: true, force: true });
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    it("maps a symlinked member checkout and its skills dir with PI_HERMES_MEMORY_SCOPE alone", () => {
+      withScopeFixture(({ repo, makeInitiative }) => {
+        const ws = makeInitiative("hermes-only");
+        process.env.PI_HERMES_MEMORY_SCOPE = ws;
+        const name = path.basename(ws);
+        assert.strictEqual(detectProject("projects-memory", repo).name, name);
+        assert.strictEqual(
+          detectProjectSkills("projects-memory", repo).skillsDir,
+          path.join(AGENT_ROOT, "projects-memory", name, "skills"),
+        );
+      });
+    });
+
+    it("prefers PI_HERMES_MEMORY_SCOPE over PI_INTERCOM_SCOPE_ID when both are valid", () => {
+      withScopeFixture(({ repo, makeInitiative }) => {
+        const dedicated = makeInitiative("hermes-a");
+        const legacy = makeInitiative("intercom-b");
+        process.env.PI_HERMES_MEMORY_SCOPE = dedicated;
+        process.env.PI_INTERCOM_SCOPE_ID = legacy;
+        assert.strictEqual(detectProject("projects-memory", repo).name, path.basename(dedicated));
+      });
+    });
+
+    it("falls back to PI_INTERCOM_SCOPE_ID when PI_HERMES_MEMORY_SCOPE is empty or whitespace", () => {
+      withScopeFixture(({ repo, makeInitiative }) => {
+        const legacy = makeInitiative("intercom-fallback");
+        process.env.PI_INTERCOM_SCOPE_ID = legacy;
+        for (const blank of ["", "   "]) {
+          process.env.PI_HERMES_MEMORY_SCOPE = blank;
+          assert.strictEqual(detectProject("projects-memory", repo).name, path.basename(legacy));
+        }
+      });
+    });
+
+    it("does not fall through to PI_INTERCOM_SCOPE_ID when PI_HERMES_MEMORY_SCOPE is non-empty but invalid", () => {
+      withScopeFixture(({ repo, repoName, makeInitiative }) => {
+        const legacy = makeInitiative("intercom-valid");
+        const wsRoot = path.join(os.homedir(), "workspaces");
+        const invalid = [
+          path.join(wsRoot, `nonexistent-${process.pid}`),
+          path.join(wsRoot, `.dotted-${process.pid}`),
+          path.join(wsRoot, `_underscore-${process.pid}`),
+          path.join(wsRoot, path.basename(legacy), "nested"),
+          path.join(os.tmpdir(), "outside-workspaces"),
+          "../../elsewhere",
+        ];
+        process.env.PI_INTERCOM_SCOPE_ID = legacy;
+        for (const value of invalid) {
+          process.env.PI_HERMES_MEMORY_SCOPE = value;
+          const name = detectProject("projects-memory", repo).name;
+          assert.strictEqual(name, repoName, `scope ${value}`);
+          assert.notStrictEqual(name, path.basename(legacy), `scope ${value}`);
+        }
+      });
+    });
+
+    it("accepts a relative PI_HERMES_MEMORY_SCOPE that resolves to a valid initiative", () => {
+      withScopeFixture(({ repo, makeInitiative }) => {
+        const ws = makeInitiative("hermes-relative");
+        process.env.PI_HERMES_MEMORY_SCOPE = path.relative(process.cwd(), ws);
+        assert.notStrictEqual(process.env.PI_HERMES_MEMORY_SCOPE, ws);
+        assert.strictEqual(detectProject("projects-memory", repo).name, path.basename(ws));
+      });
+    });
   });
 
   it("strips trailing .git suffix from bare-repo directory names outside scratch roots", () => {

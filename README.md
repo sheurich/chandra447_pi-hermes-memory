@@ -649,6 +649,20 @@ Important boundaries:
 
 The default remains `false`, so existing installations keep eager initialization.
 
+## Workspace initiative scope
+
+Project memory for a symlinked member checkout of `~/workspaces/<initiative>`
+is keyed to the initiative when `PI_HERMES_MEMORY_SCOPE` points at that
+initiative directory:
+
+```bash
+PI_HERMES_MEMORY_SCOPE=~/workspaces/<initiative> pi
+```
+
+When `PI_HERMES_MEMORY_SCOPE` is unset or blank, the legacy
+`PI_INTERCOM_SCOPE_ID` is used instead. A non-empty but invalid
+`PI_HERMES_MEMORY_SCOPE` does not fall back to the legacy variable.
+
 ## Diagnosing lifecycle latency
 
 Run Pi with timing enabled to see which memory lifecycle step is slow:
